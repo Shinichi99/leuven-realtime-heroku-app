@@ -15,6 +15,9 @@ import gzip
 import joblib
 import urllib.request
 import json 
+import io
+
+
 
 #Function for data scraping
 def scrape_loko_data():
@@ -361,19 +364,14 @@ def realtime_data(df_weather=None, event_data_school=None, event_data_loko=None,
         output_file = output_files[model_index]
     
         # Download the .gz file
-        response = requests.get(url)
+        #response = requests.get(url)
     
         # Extract the contents of the .gz file
-        extracted_data = gzip.decompress(response.content)
-    
-        # Save the extracted model to a file
-        with open(output_file, 'wb') as output:
-            output.write(extracted_data)
-    
+        extracted_data = gzip.decompress(requests.get(url).content)
+        # 
+        buffer = io.BytesIO(extracted_data)
         # Load the extracted model
-        with open(output_file, 'rb') as file:
-            model = joblib.load(file)
-    
+        model = joblib.load(buffer)
     
         # Get the predictor variables for the current row
         X = row[predictor_vars].values.reshape(1, -1)
