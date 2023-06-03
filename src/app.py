@@ -8,13 +8,13 @@ from datetime import date, timedelta
 import requests #library needed for requesting permission to website
 from bs4 import BeautifulSoup #needed for filtering through website html code
 import re
-import selenium
-from selenium import webdriver
 from functools import reduce
 import time
 import datetime
 import gzip
 import joblib
+import urllib.request
+import json 
 
 #Function for data scraping
 def scrape_loko_data():
@@ -258,81 +258,27 @@ def scrape_depot_data():
     df_next.columns = ["Event Name"]
     df_next["StartDate"] = list1
     df_next["EndDate"] = list2
+    df_next = df_next.drop_duplicates()
     
     return df_next
 
-def scrap_weather_data():
-    colnames = ['Time','Conditions','LC_TEMP_QCL3_list','Feels_Like','Precipitation_Chance',
-            'LC_RAININ','Cloud_Cover','Dew_Point','LC_HUMIDITY','Wind','Pressure']
-    def hour_mess(date_iter,data,colnames=colnames):
-        timevals = (pd.DataFrame([data[i:i+10] for i in range(0, len(data), 11 )])
-                .pipe(lambda x: x.iloc[:, 0]).rename('datetime',inplace=True).to_frame()
-                .pipe(lambda x: x.assign(Time=date_iter + ' ' + x['datetime'])).drop('datetime',axis=1)
-                .pipe(lambda x: x.assign(Time=pd.to_datetime(x['Time'], format='%Y-%m-%d %I:%M %p',utc=True))))
-        cvals = pd.DataFrame([data[i] for i in range(1, len(data), 11)], columns=[colnames[1]])
-        tempvals = (pd.DataFrame([data[i:i+10] for i in range(2, len(data), 11)])
-               .pipe(lambda x: x.iloc[:, 0]).pipe(lambda x: x.str.extract('(\d+)')).pipe(lambda x: x.astype(float))
-               .pipe(lambda x: x.rename(columns={0: 'LC_TEMP_QCL3_list'})).pipe(lambda x: (x-32)*5/9))
-        flvals = (pd.DataFrame([data[i:i+10] for i in range(3, len(data), 11)])
-               .pipe(lambda x: x.iloc[:, 0]).pipe(lambda x: x.str.extract('(\d+)')).pipe(lambda x: x.astype(float))
-               .pipe(lambda x: x.rename(columns={0: 'Feels_Like'})).pipe(lambda x: (x-32)*5/9))
-        pcvals = (pd.DataFrame([data[i:i+10] for i in range(4, len(data), 11)])
-               .pipe(lambda x: x.iloc[:, 0]).pipe(lambda x: x.str.extract('(\d+)'))
-               .pipe(lambda x: x.astype(int)).pipe(lambda x: x.rename(columns={0: 'Precipitation_Chance'})))
-        drsvals = (pd.DataFrame([data[i:i+10] for i in range(5, len(data), 11)])
-               .pipe(lambda x: x.iloc[:, 0]).pipe(lambda x: x.str.extract('(\d+)')).pipe(lambda x: x.astype(int))
-               .pipe(lambda x: x.rename(columns={0: 'LC_RAININ'})).pipe(lambda x: x*25.4))
-        ccvals = (pd.DataFrame([data[i:i+10] for i in range(6, len(data), 11)])
-               .pipe(lambda x: x.iloc[:, 0]).pipe(lambda x: x.str.extract('(\d+)'))
-               .pipe(lambda x: x.astype(int)).pipe(lambda x: x.rename(columns={0: 'Cloud_Cover'})))
-        dpvals = (pd.DataFrame([data[i:i+10] for i in range(7, len(data), 11)])
-               .pipe(lambda x: x.iloc[:, 0]).pipe(lambda x: x.str.extract('(\d+)'))
-               .pipe(lambda x: x.astype(float)).pipe(lambda x: x.rename(columns={0: 'Dew_Point'})).pipe(lambda x: (x-32)*5/9))
-        hvals = (pd.DataFrame([data[i:i+10] for i in range(8, len(data), 11)])
-               .pipe(lambda x: x.iloc[:, 0]).pipe(lambda x: x.str.extract('(\d+)'))
-               .pipe(lambda x: x.astype(int)).pipe(lambda x: x.rename(columns={0: 'LC_HUMIDITY'})))
-        wvals = (pd.DataFrame([data[i:i+10] for i in range(9, len(data), 11)])
-               .pipe(lambda x: x.iloc[:, 0]).pipe(lambda x: x.str.extract('(\d+)')).pipe(lambda x: x.astype(float)).pipe(lambda x: x / 2.237)
-               .pipe(lambda x: x.rename(columns={0: 'Wind'})))
-        pvals = (pd.DataFrame([data[i:i+9] for i in range(10, len(data), 11)])
-               .pipe(lambda x: x.iloc[:, 0]).pipe(lambda x: x.str.extract('(\d+)')).pipe(lambda x: x.astype(int))
-               .pipe(lambda x: x.rename(columns={0: 'Pressure'})).pipe(lambda x: x*33.8627906977))
+def scrap_weather_data():  
+    #make empty DataFrame
+    colnames = ['LC_TEMP_QCL3_list', 'LC_RAININ', 'LC_HUMIDITY']
+    df = pd.DataFrame(columns=colnames)
 
-        df_data = pd.concat(objs=[timevals,cvals,tempvals,flvals,pcvals,
-                              drsvals,ccvals,dpvals,hvals,wvals,pvals],axis=1)
-        return df_data
+    #current hour
+    target_time = datetime.datetime.now().strftime('%Y-%m-%dT%H:00')
 
-    def render_page(url):
-            driver = webdriver.Chrome()
-            driver.get(url)
-            driver.implicitly_wait(5)
-            time.sleep(5) #open content and so it fully renders, then parse it. crawl delay is 10 seconds at least, so make it 11 for ethics.
-            r = driver.page_source
-            driver.quit()
-            return r
+    #download json object as dictory
+    url = 'https://api.open-meteo.com/v1/forecast?latitude=50.88&longitude=4.70&hourly=temperature_2m,relativehumidity_2m,rain&forecast_days=1&timezone=Europe%2FBerlin'
+    with urllib.request.urlopen(url) as url:
+        data = json.loads(url.read().decode())
 
-    dates = [datetime.datetime.now().strftime('%Y-%m-%d')] #assume only one day is needed for this one.
-    page = 'https://www.wunderground.com/hourly/be/leuven/date/' #the main page for the leuven hourly forecast data.
-
-    combined_output = pd.DataFrame()
-    #colnames has been defined above in the collapsed cell block
-    for date_iter in dates:
-        url = str(str(page)+str(date_iter))
-        r = render_page(url)
-        soup = BeautifulSoup(r, "html.parser")
-        container = soup.find('lib-city-hourly-forecast')
-        check = container.find('tbody') #the part of the site i actually want
-
-        data = []
-        for c in check.find_all('tr', class_='mat-row cdk-row ng-star-inserted'):
-            for i in c.find_all('td', class_='ng-star-inserted'):
-                trial = i.text
-                trial = trial.strip('  ')
-                data.append(trial)
-    
-        output=hour_mess(date_iter=date_iter,data=data,colnames=colnames)
-        combined_output = pd.concat(objs=[combined_output,output])
-    return combined_output
+    #put variables into the dataframe
+    index = data['hourly']['time'].index(target_time)
+    df.loc[0] = [data['hourly']['temperature_2m'][index], data['hourly']['rain'][index], data['hourly']['relativehumidity_2m'][index]]
+    return df
 
 #Function for realtime data predictors
 def date_split(df):
@@ -386,7 +332,7 @@ def realtime_data(df_weather=None, event_data_school=None, event_data_loko=None,
     df['weekday'] = datetime.datetime.now().strftime('%A')
     df['LC_HUMIDITY'] = df_weather['LC_HUMIDITY']
     df['LC_RAININ'] = df_weather['LC_RAININ']
-    df['LC_TEMP_QCL3_list'] = df_weather['LC_RAININ']
+    df['LC_TEMP_QCL3_list'] = df_weather['LC_TEMP_QCL3_list']
     df['school'] = len(event_data_school)
     df['loko'] = len(event_data_loko)
     df['depot'] = len(event_data_depot)
@@ -513,7 +459,7 @@ app.layout = dbc.Container([
 
     dbc.Row([dcc.Markdown('**Real time data extraction** \U0001F4C5',
                          style={'font-weight': 'bold', 'font-size': '20px', 'font-style': 'italic'}),
-             html.Button('Click here to see the content', id='btn-nclicks-1'),        
+             html.Button('Click here to update', id='btn-nclicks-1'),        
     ]),
 
     dbc.Row([
